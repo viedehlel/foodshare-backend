@@ -1,0 +1,96 @@
+import { Router, Response } from 'express';
+import { pool } from '../db/pool';
+import { requireAuth } from '../middleware/auth';
+import { upload } from '../middleware/upload';
+import { AuthRequest } from '../types';
+
+const router = Router();
+
+// GET /posts — feed (posts of people you follow + your own)
+router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         p.id, p.image_url, p.caption, p.location, p.created_at,
+         p.recipe_id,
+         r.title AS recipe_title,
+         u.id AS user_id, u.name AS user_name, u.avatar_url,
+         (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,
+         (SELECT COALESCE(json_agg(json_build_object('type', k.type, 'icon', k.icon, 'count', k.cnt)), '[]')
+          FROM (SELECT type, icon, COUNT(*)::int AS cnt FROM kudos WHERE post_id = p.id GROUP BY type, icon) k
+         ) AS kudos
+       FROM posts p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN recipes r ON r.id = p.recipe_id
+       WHERE p.user_id = $1
+          OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1)
+       ORDER BY p.created_at DESC
+       LIMIT 50`,
+      [req.userId]
+    );
+    res.json({ posts: rows });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /posts — create a post with image upload
+router.post('/', requireAuth, upload.single('image'), async (req: AuthRequest, res: Response) => {
+  const file = req.file as any;
+  if (!file) { res.status(400).json({ error: 'image is required' }); return; }
+  const { caption, location, recipe_id } = req.body as { caption: string; location?: string; recipe_id?: string };
+  if (!caption) { res.status(400).json({ error: 'caption is required' }); return; }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO posts (user_id, image_url, caption, location, recipe_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, image_url, caption, location, recipe_id, created_at`,
+      [req.userId, file.path, caption, location ?? null, recipe_id ?? null]
+    );
+    res.status(201).json({ post: rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /posts/:id — single post detail
+router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         p.id, p.image_url, p.caption, p.location, p.created_at,
+         p.recipe_id,
+         r.title AS recipe_title,
+         u.id AS user_id, u.name AS user_name, u.avatar_url,
+         (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,
+         (SELECT COALESCE(json_agg(json_build_object('type', k.type, 'icon', k.icon, 'count', k.cnt)), '[]')
+          FROM (SELECT type, icon, COUNT(*)::int AS cnt FROM kudos WHERE post_id = p.id GROUP BY type, icon) k
+         ) AS kudos
+       FROM posts p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN recipes r ON r.id = p.recipe_id
+       WHERE p.id = $1`,
+      [req.params.id]
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Post not found' }); return; }
+    res.json({ post: rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /posts/:id
+router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM posts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (!rowCount) { res.status(404).json({ error: 'Post not found or unauthorized' }); return; }
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+export default router;
