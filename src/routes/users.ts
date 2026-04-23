@@ -21,8 +21,8 @@ router.get('/search', requireAuth, async (req: AuthRequest, res: Response) => {
       [`%${q}%`, req.userId]
     );
     res.json({ users: rows });
-  } catch {
-    res.status(500).json({ error: 'Server error' });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 
