@@ -5,6 +5,27 @@ import { AuthRequest } from '../types';
 
 const router = Router();
 
+// GET /users/search?q=... — search users
+router.get('/search', requireAuth, async (req: AuthRequest, res: Response) => {
+  const q = (req.query.q as string ?? '').trim();
+  if (!q) { res.json({ users: [] }); return; }
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.avatar_url, u.bio, u.city,
+              (SELECT COUNT(*) FROM follows WHERE following_id = u.id)::int AS followers_count,
+              EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND following_id = u.id) AS is_following
+       FROM users u
+       WHERE u.id != $2
+         AND (u.name ILIKE $1 OR u.email ILIKE $1)
+       LIMIT 20`,
+      [`%${q}%`, req.userId]
+    );
+    res.json({ users: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /users/:id — public profile
 router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
