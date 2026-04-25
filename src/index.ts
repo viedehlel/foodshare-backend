@@ -7,6 +7,7 @@ import recipesRoutes from './routes/recipes';
 import commentsRoutes from './routes/comments';
 import kudosRoutes from './routes/kudos';
 import usersRoutes from './routes/users';
+import notificationsRoutes from './routes/notifications';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/posts/:postId/comments', commentsRoutes);
 app.use('/posts/:postId/kudos', kudosRoutes);
 app.use('/recipes', recipesRoutes);
 app.use('/users', usersRoutes);
+app.use('/notifications', notificationsRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

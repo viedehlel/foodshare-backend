@@ -115,6 +115,12 @@ router.post('/:id/like', requireAuth, async (req: AuthRequest, res: Response) =>
       res.json({ liked: false });
     } else {
       await pool.query('INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2)', [req.params.id, req.userId]);
+      pool.query(
+        `INSERT INTO notifications (user_id, actor_id, type, post_id)
+         SELECT p.user_id, $2, 'like', $1 FROM posts p
+         WHERE p.id = $1 AND p.user_id != $2`,
+        [req.params.id, req.userId]
+      ).catch(() => {});
       res.json({ liked: true });
     }
   } catch {

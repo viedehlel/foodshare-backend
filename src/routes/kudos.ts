@@ -25,6 +25,12 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         'INSERT INTO kudos (post_id, user_id, type, icon) VALUES ($1,$2,$3,$4)',
         [req.params.postId, req.userId, type, icon]
       );
+      pool.query(
+        `INSERT INTO notifications (user_id, actor_id, type, post_id, kudo_type)
+         SELECT p.user_id, $2, 'kudo', $1, $3 FROM posts p
+         WHERE p.id = $1 AND p.user_id != $2`,
+        [req.params.postId, req.userId, type]
+      ).catch(() => {});
       res.json({ given: true });
     }
   } catch {

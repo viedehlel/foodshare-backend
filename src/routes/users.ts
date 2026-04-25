@@ -157,6 +157,11 @@ router.post('/:id/follow', requireAuth, async (req: AuthRequest, res: Response) 
       res.json({ following: false });
     } else {
       await pool.query('INSERT INTO follows (follower_id, following_id) VALUES ($1,$2)', [req.userId, req.params.id]);
+      pool.query(
+        `INSERT INTO notifications (user_id, actor_id, type)
+         VALUES ($1, $2, 'follow')`,
+        [req.params.id, req.userId]
+      ).catch(() => {});
       res.json({ following: true });
     }
   } catch {

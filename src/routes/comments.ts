@@ -58,6 +58,12 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
        RETURNING id, text, created_at`,
       [req.params.postId, req.userId, text.trim()]
     );
+    pool.query(
+      `INSERT INTO notifications (user_id, actor_id, type, post_id)
+       SELECT p.user_id, $2, 'comment', $1 FROM posts p
+       WHERE p.id = $1 AND p.user_id != $2`,
+      [req.params.postId, req.userId]
+    ).catch(() => {});
     res.status(201).json({ comment: rows[0] });
   } catch {
     res.status(500).json({ error: 'Server error' });
