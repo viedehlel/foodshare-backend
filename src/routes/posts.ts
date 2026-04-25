@@ -17,13 +17,20 @@ pool.query(`
   )
 `).catch(() => {});
 
+// Auto-migrate: place columns on posts
+pool.query(`
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS place_id TEXT;
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS place_name TEXT;
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS place_address TEXT;
+`).catch(() => {});
+
 // GET /posts — feed (posts of people you follow + your own)
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
       `SELECT
          p.id, p.image_url, p.caption, p.location, p.created_at,
-         p.recipe_id,
+         p.recipe_id, p.place_id, p.place_name, p.place_address,
          r.title AS recipe_title,
          u.id AS user_id, u.name AS user_name, u.avatar_url,
          (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,
@@ -51,14 +58,18 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 router.post('/', requireAuth, upload.single('image'), async (req: AuthRequest, res: Response) => {
   const file = req.file as any;
   if (!file) { res.status(400).json({ error: 'image is required' }); return; }
-  const { caption, location, recipe_id } = req.body as { caption: string; location?: string; recipe_id?: string };
+  const { caption, location, recipe_id, place_id, place_name, place_address } = req.body as {
+    caption: string; location?: string; recipe_id?: string;
+    place_id?: string; place_name?: string; place_address?: string;
+  };
   if (!caption) { res.status(400).json({ error: 'caption is required' }); return; }
   try {
     const { rows } = await pool.query(
-      `INSERT INTO posts (user_id, image_url, caption, location, recipe_id)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, image_url, caption, location, recipe_id, created_at`,
-      [req.userId, file.path, caption, location ?? null, recipe_id ?? null]
+      `INSERT INTO posts (user_id, image_url, caption, location, recipe_id, place_id, place_name, place_address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, image_url, caption, location, recipe_id, place_id, place_name, place_address, created_at`,
+      [req.userId, file.path, caption, location ?? null, recipe_id ?? null,
+       place_id ?? null, place_name ?? null, place_address ?? null]
     );
     res.status(201).json({ post: rows[0] });
   } catch {
@@ -72,7 +83,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     const { rows } = await pool.query(
       `SELECT
          p.id, p.image_url, p.caption, p.location, p.created_at,
-         p.recipe_id,
+         p.recipe_id, p.place_id, p.place_name, p.place_address,
          r.title AS recipe_title,
          u.id AS user_id, u.name AS user_name, u.avatar_url,
          (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,

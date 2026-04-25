@@ -81,6 +81,49 @@ router.get('/:id/following', requireAuth, async (req: AuthRequest, res: Response
   }
 });
 
+// GET /users/:id/places — top restaurants visited by user
+router.get('/:id/places', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT place_id, place_name, place_address, COUNT(*)::int AS post_count
+       FROM posts
+       WHERE user_id = $1 AND place_id IS NOT NULL
+       GROUP BY place_id, place_name, place_address
+       ORDER BY post_count DESC`,
+      [req.params.id]
+    );
+    res.json({ places: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /users/:id/places/:placeId/posts — user's posts at a specific restaurant
+router.get('/:id/places/:placeId/posts', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         p.id, p.image_url, p.caption, p.location, p.created_at,
+         p.place_id, p.place_name, p.place_address,
+         u.id AS user_id, u.name AS user_name, u.avatar_url,
+         (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,
+         (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)::int AS like_count,
+         EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = $3) AS liked_by_me,
+         (SELECT COALESCE(json_agg(json_build_object('type', k.type, 'icon', k.icon, 'count', k.cnt)), '[]')
+          FROM (SELECT type, icon, COUNT(*)::int AS cnt FROM kudos WHERE post_id = p.id GROUP BY type, icon) k
+         ) AS kudos
+       FROM posts p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.user_id = $1 AND p.place_id = $2
+       ORDER BY p.created_at DESC`,
+      [req.params.id, req.params.placeId, req.userId]
+    );
+    res.json({ posts: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /users/:id/posts
 router.get('/:id/posts', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
