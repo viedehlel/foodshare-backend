@@ -113,6 +113,80 @@ router.post('/', requireAuth, upload.single('image'), async (req: AuthRequest, r
   }
 });
 
+// PATCH /recipes/:id — update recipe
+router.patch('/:id', requireAuth, upload.single('image'), async (req: AuthRequest, res: Response) => {
+  const file = req.file as any;
+  const {
+    title, description, prep_time, cook_time, servings, difficulty,
+    tags, utensils, ingredients, steps,
+  } = req.body as {
+    title?: string; description?: string; prep_time?: string; cook_time?: string;
+    servings?: string; difficulty?: string; tags?: string; utensils?: string;
+    ingredients?: string; steps?: string;
+  };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: existing } = await client.query(
+      'SELECT id FROM recipes WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (!existing[0]) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Recipe not found or unauthorized' });
+      return;
+    }
+
+    const sets: string[] = [];
+    const vals: any[] = [];
+    let n = 1;
+    if (title !== undefined) { sets.push(`title = $${n++}`); vals.push(title); }
+    if (description !== undefined) { sets.push(`description = $${n++}`); vals.push(description || null); }
+    if (prep_time !== undefined) { sets.push(`prep_time = $${n++}`); vals.push(prep_time ? parseInt(prep_time) : null); }
+    if (cook_time !== undefined) { sets.push(`cook_time = $${n++}`); vals.push(cook_time ? parseInt(cook_time) : null); }
+    if (servings !== undefined) { sets.push(`servings = $${n++}`); vals.push(servings ? parseInt(servings) : null); }
+    if (difficulty !== undefined) { sets.push(`difficulty = $${n++}`); vals.push(difficulty || null); }
+    if (tags !== undefined) { sets.push(`tags = $${n++}`); vals.push(tags ? JSON.parse(tags) : null); }
+    if (utensils !== undefined) { sets.push(`utensils = $${n++}`); vals.push(utensils ? JSON.parse(utensils) : null); }
+    if (file?.path) { sets.push(`image_url = $${n++}`); vals.push(file.path); }
+    if (sets.length > 0) {
+      vals.push(req.params.id);
+      await client.query(`UPDATE recipes SET ${sets.join(', ')} WHERE id = $${n}`, vals);
+    }
+
+    if (ingredients !== undefined) {
+      await client.query('DELETE FROM recipe_ingredients WHERE recipe_id = $1', [req.params.id]);
+      const parsed: { name: string; amount: string; unit: string }[] = JSON.parse(ingredients);
+      for (let i = 0; i < parsed.length; i++) {
+        await client.query(
+          'INSERT INTO recipe_ingredients (recipe_id, name, amount, unit, position) VALUES ($1,$2,$3,$4,$5)',
+          [req.params.id, parsed[i].name, parsed[i].amount, parsed[i].unit, i]
+        );
+      }
+    }
+
+    if (steps !== undefined) {
+      await client.query('DELETE FROM recipe_steps WHERE recipe_id = $1', [req.params.id]);
+      const parsed: { text: string }[] = JSON.parse(steps);
+      for (let i = 0; i < parsed.length; i++) {
+        await client.query(
+          'INSERT INTO recipe_steps (recipe_id, text, position) VALUES ($1,$2,$3)',
+          [req.params.id, parsed[i].text, i]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /recipes/:id
 router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
