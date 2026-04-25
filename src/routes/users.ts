@@ -45,6 +45,42 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /users/:id/followers
+router.get('/:id/followers', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.avatar_url, u.bio, u.city,
+              EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND following_id = u.id) AS is_following
+       FROM follows f
+       JOIN users u ON u.id = f.follower_id
+       WHERE f.following_id = $1
+       ORDER BY u.name`,
+      [req.params.id, req.userId]
+    );
+    res.json({ users: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /users/:id/following
+router.get('/:id/following', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.avatar_url, u.bio, u.city,
+              EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND following_id = u.id) AS is_following
+       FROM follows f
+       JOIN users u ON u.id = f.following_id
+       WHERE f.follower_id = $1
+       ORDER BY u.name`,
+      [req.params.id, req.userId]
+    );
+    res.json({ users: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /users/:id/posts
 router.get('/:id/posts', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
