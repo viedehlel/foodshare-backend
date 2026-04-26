@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
+import { upload } from '../middleware/upload';
 import { AuthRequest } from '../types';
 
 const router = Router();
@@ -93,6 +94,21 @@ router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) =>
        WHERE id = $5
        RETURNING id, name, email, avatar_url, bio, city`,
       [name, bio, city, avatar_url, req.userId]
+    );
+    res.json({ user: rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /auth/avatar
+router.post('/avatar', requireAuth, upload.single('image'), async (req: AuthRequest, res: Response) => {
+  const file = req.file as any;
+  if (!file?.path) { res.status(400).json({ error: 'image required' }); return; }
+  try {
+    const { rows } = await pool.query(
+      'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, name, email, avatar_url, bio, city',
+      [file.path, req.userId]
     );
     res.json({ user: rows[0] });
   } catch {
