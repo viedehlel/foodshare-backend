@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
-import { cloudinary } from '../middleware/upload';
+import { cloudinary, upload } from '../middleware/upload';
 import { AuthRequest } from '../types';
 
 // ─── Auto-migration ───────────────────────────────────────────────────────────
@@ -458,6 +458,13 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
     } catch {
       res.status(500).json({ error: 'Server error' });
     }
+  });
+
+  // ─── POST /upload/image ────────────────────────────────────────────────────
+
+  router.post('/upload/image', requireAuth, upload.single('image'), (req: AuthRequest, res: Response) => {
+    if (!req.file) { res.status(400).json({ error: 'No file' }); return; }
+    res.json({ url: (req.file as any).path });
   });
 
   // ─── POST /upload/voice ────────────────────────────────────────────────────
