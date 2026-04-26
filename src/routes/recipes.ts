@@ -6,7 +6,7 @@ import { AuthRequest } from '../types';
 
 const router = Router();
 
-// GET /recipes — all recipes (public + own)
+// GET /recipes — own recipes only
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
@@ -15,7 +15,9 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
               u.id AS user_id, u.name AS user_name, u.avatar_url
        FROM recipes r
        JOIN users u ON u.id = r.user_id
-       ORDER BY r.created_at DESC`
+       WHERE r.user_id = $1
+       ORDER BY r.created_at DESC`,
+      [req.userId]
     );
     res.json({ recipes: rows });
   } catch {
