@@ -77,7 +77,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
         (
           SELECT row_to_json(lm) FROM (
             SELECT m.id, m.type, m.content, m.sender_id,
-                   EXTRACT(EPOCH FROM m.created_at)::bigint * 1000 AS created_at
+                   FLOOR(EXTRACT(EPOCH FROM m.created_at) * 1000) AS created_at
             FROM messages m
             WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
             ORDER BY m.created_at DESC LIMIT 1
@@ -92,7 +92,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
           WHERE cm2.conversation_id = c.id
         ) AS members,
         (
-          SELECT EXTRACT(EPOCH FROM cm3.last_read_at)::bigint * 1000
+          SELECT FLOOR(EXTRACT(EPOCH FROM cm3.last_read_at) * 1000)
           FROM conversation_members cm3
           WHERE cm3.conversation_id = c.id AND cm3.user_id != $2
           LIMIT 1
@@ -123,7 +123,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
           (
             SELECT row_to_json(lm) FROM (
               SELECT m.id, m.type, m.content, m.sender_id,
-                     EXTRACT(EPOCH FROM m.created_at)::bigint * 1000 AS created_at
+                     FLOOR(EXTRACT(EPOCH FROM m.created_at) * 1000) AS created_at
               FROM messages m
               WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
               ORDER BY m.created_at DESC LIMIT 1
@@ -138,7 +138,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
             WHERE cm2.conversation_id = c.id
           ) AS members,
           (
-            SELECT EXTRACT(EPOCH FROM cm3.last_read_at)::bigint * 1000
+            SELECT FLOOR(EXTRACT(EPOCH FROM cm3.last_read_at) * 1000)
             FROM conversation_members cm3
             WHERE cm3.conversation_id = c.id AND cm3.user_id != $1
             LIMIT 1
@@ -247,7 +247,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
         `SELECT
           m.id, m.type, m.content, m.voice_url, m.voice_duration_sec,
           m.recipe_id, m.poll_data,
-          EXTRACT(EPOCH FROM m.created_at)::bigint * 1000 AS created_at,
+          FLOOR(EXTRACT(EPOCH FROM m.created_at) * 1000) AS created_at,
           json_build_object('id', u.id, 'name', u.name, 'avatar', u.avatar_url) AS sender,
           COALESCE(
             (SELECT json_agg(json_build_object('emoji', r.emoji, 'userId', r.user_id))
@@ -304,7 +304,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
            (conversation_id, sender_id, type, content, voice_url, voice_duration_sec, recipe_id, poll_data)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, type, content, voice_url, voice_duration_sec, recipe_id, poll_data,
-                   EXTRACT(EPOCH FROM created_at)::bigint * 1000 AS created_at`,
+                   FLOOR(EXTRACT(EPOCH FROM created_at) * 1000) AS created_at`,
         [req.params.id, req.userId, type, content ?? null, voice_url ?? null,
          voice_duration_sec ?? null, recipe_id ?? null,
          poll_data ? JSON.stringify(poll_data) : null]
@@ -418,7 +418,7 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
     try {
       const { rows } = await pool.query(
         `SELECT mr.id, mr.status,
-                EXTRACT(EPOCH FROM mr.created_at)::bigint * 1000 AS created_at,
+                FLOOR(EXTRACT(EPOCH FROM mr.created_at) * 1000) AS created_at,
                 json_build_object('id', u.id, 'name', u.name, 'avatar', u.avatar_url) AS from_user,
                 (SELECT content FROM messages WHERE conversation_id = mr.conversation_id
                  ORDER BY created_at ASC LIMIT 1) AS preview
