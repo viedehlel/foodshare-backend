@@ -187,8 +187,30 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
           [conv.id, uid]
         );
       }
+
+      // If direct conversation and no follow relationship exists, create a message request
+      let isRequest = false;
+      if (type === 'direct' && userIds.length === 1) {
+        const { rows: followRows } = await pool.query(
+          `SELECT 1 FROM follows
+           WHERE (follower_id = $1 AND following_id = $2)
+              OR (follower_id = $2 AND following_id = $1)
+           LIMIT 1`,
+          [req.userId, userIds[0]]
+        );
+        if (!followRows.length) {
+          await pool.query(
+            `INSERT INTO message_requests (conversation_id, from_user_id, to_user_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT DO NOTHING`,
+            [conv.id, req.userId, userIds[0]]
+          );
+          isRequest = true;
+        }
+      }
+
       const full = await fetchConversation(conv.id, req.userId!);
-      res.json({ conversation: full });
+      res.json({ conversation: full, isRequest });
     } catch {
       res.status(500).json({ error: 'Server error' });
     }
