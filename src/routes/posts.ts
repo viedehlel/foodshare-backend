@@ -128,6 +128,40 @@ router.post('/:id/like', requireAuth, async (req: AuthRequest, res: Response) =>
   }
 });
 
+// GET /posts/:id/likes/users — who liked this post
+router.get('/:id/likes/users', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.avatar_url, u.bio
+       FROM post_likes pl
+       JOIN users u ON u.id = pl.user_id
+       WHERE pl.post_id = $1
+       ORDER BY pl.created_at DESC`,
+      [req.params.id]
+    );
+    res.json({ users: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /posts/:id/kudos/users — who gave kudos on this post
+router.get('/:id/kudos/users', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.avatar_url, u.bio, k.type, k.icon
+       FROM kudos k
+       JOIN users u ON u.id = k.user_id
+       WHERE k.post_id = $1
+       ORDER BY k.created_at DESC`,
+      [req.params.id]
+    );
+    res.json({ users: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // DELETE /posts/:id
 router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
