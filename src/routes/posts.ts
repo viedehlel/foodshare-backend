@@ -153,7 +153,7 @@ router.get('/:id/kudos/users', requireAuth, async (req: AuthRequest, res: Respon
        FROM kudos k
        JOIN users u ON u.id = k.user_id
        WHERE k.post_id = $1
-       ORDER BY k.created_at DESC`,
+       ORDER BY u.name`,
       [req.params.id]
     );
     res.json({ users: rows });
