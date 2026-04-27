@@ -38,7 +38,10 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
          EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = $1) AS liked_by_me,
          (SELECT COALESCE(json_agg(json_build_object('type', k.type, 'icon', k.icon, 'count', k.cnt)), '[]')
           FROM (SELECT type, icon, COUNT(*)::int AS cnt FROM kudos WHERE post_id = p.id GROUP BY type, icon) k
-         ) AS kudos
+         ) AS kudos,
+         (SELECT COALESCE(json_agg(k2.type), '[]')
+          FROM kudos k2 WHERE k2.post_id = p.id AND k2.user_id = $1
+         ) AS my_kudos
        FROM posts p
        JOIN users u ON u.id = p.user_id
        LEFT JOIN recipes r ON r.id = p.recipe_id
