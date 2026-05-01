@@ -63,4 +63,102 @@ router.patch('/:id/read', requireAuth, async (req: AuthRequest, res: Response) =
   }
 });
 
+// ─── Push tokens ──────────────────────────────────────────────────────────────
+
+// POST /notifications/token — register or refresh a push token for current user
+router.post('/token', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { token, platform } = req.body as { token: string; platform: string };
+  if (!token || !platform) { res.status(400).json({ error: 'token_and_platform_required' }); return; }
+  try {
+    // Token UNIQUE : si un autre user avait ce token (rare, ex: même device), on l'écrase.
+    await pool.query(
+      `INSERT INTO push_tokens (user_id, token, platform, last_seen_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (token) DO UPDATE
+         SET user_id = EXCLUDED.user_id,
+             platform = EXCLUDED.platform,
+             last_seen_at = NOW()`,
+      [req.userId, token, platform],
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[notifications/token]', err);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// DELETE /notifications/token — unregister a push token (called on logout)
+router.delete('/token', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { token } = req.body as { token: string };
+  if (!token) { res.status(400).json({ error: 'token_required' }); return; }
+  try {
+    await pool.query(
+      'DELETE FROM push_tokens WHERE user_id = $1 AND token = $2',
+      [req.userId, token],
+    );
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// ─── Notification preferences ─────────────────────────────────────────────────
+
+const DEFAULT_PREFS = {
+  likes: true, kudos: true, comments: true,
+  mentions: true, follows: true, messages: true,
+};
+
+// GET /notifications/settings
+router.get('/settings', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT likes, kudos, comments, mentions, follows, messages
+         FROM notif_preferences WHERE user_id = $1`,
+      [req.userId],
+    );
+    const settings = rows[0] ?? DEFAULT_PREFS;
+    res.json({ settings });
+  } catch {
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// PATCH /notifications/settings
+router.patch('/settings', requireAuth, async (req: AuthRequest, res: Response) => {
+  const allowed = ['likes', 'kudos', 'comments', 'mentions', 'follows', 'messages'] as const;
+  const updates: Partial<Record<typeof allowed[number], boolean>> = {};
+  for (const k of allowed) {
+    if (typeof req.body?.[k] === 'boolean') updates[k] = req.body[k];
+  }
+  try {
+    // UPSERT : insère avec defaults si pas de row, sinon merge
+    const cols = Object.keys(updates);
+    if (cols.length === 0) {
+      const { rows } = await pool.query(
+        `SELECT likes, kudos, comments, mentions, follows, messages
+         FROM notif_preferences WHERE user_id = $1`,
+        [req.userId],
+      );
+      res.json({ settings: rows[0] ?? DEFAULT_PREFS });
+      return;
+    }
+    const setClause = cols.map((c, i) => `${c} = $${i + 2}`).join(', ');
+    const insertCols = ['user_id', ...cols].join(', ');
+    const insertVals = [req.userId, ...cols.map(c => updates[c as keyof typeof updates])];
+    const insertPlaceholders = insertVals.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows } = await pool.query(
+      `INSERT INTO notif_preferences (${insertCols})
+         VALUES (${insertPlaceholders})
+       ON CONFLICT (user_id) DO UPDATE SET ${setClause}, updated_at = NOW()
+       RETURNING likes, kudos, comments, mentions, follows, messages`,
+      insertVals,
+    );
+    res.json({ settings: rows[0] });
+  } catch (err) {
+    console.error('[notifications/settings]', err);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 export default router;

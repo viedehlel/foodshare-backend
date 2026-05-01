@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { sendPush } from '../lib/push';
 
 const router = Router();
 
@@ -162,6 +163,20 @@ router.post('/:id/follow', requireAuth, async (req: AuthRequest, res: Response) 
          VALUES ($1, $2, 'follow')`,
         [req.params.id, req.userId]
       ).catch(() => {});
+      (async () => {
+        try {
+          const { rows } = await pool.query('SELECT name FROM users WHERE id = $1', [req.userId]);
+          if (rows[0]) {
+            sendPush({
+              userIds: [String(req.params.id)],
+              title: rows[0].name,
+              body: 'a commencé à te suivre',
+              category: 'follows',
+              data: { url: `foodshare://user/${req.userId}` },
+            });
+          }
+        } catch {}
+      })();
       res.json({ following: true });
     }
   } catch {

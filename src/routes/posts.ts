@@ -3,6 +3,7 @@ import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
 import { upload } from '../middleware/upload';
 import { AuthRequest } from '../types';
+import { sendPush } from '../lib/push';
 
 const router = Router();
 
@@ -124,6 +125,26 @@ router.post('/:id/like', requireAuth, async (req: AuthRequest, res: Response) =>
          WHERE p.id = $1 AND p.user_id != $2`,
         [req.params.id, req.userId]
       ).catch(() => {});
+      // Fire push (fire-and-forget)
+      (async () => {
+        try {
+          const { rows } = await pool.query(
+            `SELECT p.user_id::text AS author_id, u.name AS actor_name
+               FROM posts p, users u
+               WHERE p.id = $1 AND u.id = $2 AND p.user_id != $2`,
+            [req.params.id, req.userId],
+          );
+          if (rows[0]) {
+            sendPush({
+              userIds: [rows[0].author_id],
+              title: rows[0].actor_name,
+              body: 'a aimé ton plat',
+              category: 'likes',
+              data: { url: `foodshare://post/${req.params.id}` },
+            });
+          }
+        } catch {}
+      })();
       res.json({ liked: true });
     }
   } catch {

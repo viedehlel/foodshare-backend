@@ -4,6 +4,7 @@ import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
 import { cloudinary, upload } from '../middleware/upload';
 import { AuthRequest } from '../types';
+import { sendPush, truncate } from '../lib/push';
 
 // ─── Auto-migration ───────────────────────────────────────────────────────────
 
@@ -324,6 +325,30 @@ export function createMessagesRouter(emitToUser: (userId: string, event: string,
         [req.params.id]
       );
       members.forEach(m => emitToUser(m.user_id, 'new_message', message));
+
+      // Push to other members (fire-and-forget)
+      (async () => {
+        try {
+          const recipientIds = members.map(m => m.user_id).filter(id => id !== req.userId);
+          if (recipientIds.length === 0) return;
+          let body: string;
+          if (type === 'recipe') body = '🍽️ a partagé une recette';
+          else if (type === 'post') body = '📷 a partagé une publication';
+          else if (type === 'profile') body = '👤 a partagé un profil';
+          else if (type === 'image') body = '📷 a envoyé une photo';
+          else if (type === 'voice') body = '🎤 a envoyé un message vocal';
+          else if (type === 'poll') body = '📊 a lancé un sondage';
+          else body = truncate(content ?? '', 100);
+          sendPush({
+            userIds: recipientIds,
+            title: sender.name,
+            body,
+            category: 'messages',
+            channelId: 'messages',
+            data: { url: `foodshare://messages/${req.params.id}` },
+          });
+        } catch {}
+      })();
 
       res.json({ message });
     } catch {

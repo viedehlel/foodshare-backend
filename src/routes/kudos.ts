@@ -2,6 +2,13 @@ import { Router, Response } from 'express';
 import { pool } from '../db/pool';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { sendPush } from '../lib/push';
+
+const KUDO_LABELS: Record<string, string> = {
+  technique: 'Kudos Technique 👨‍🍳',
+  exploration: 'Kudos Exploration 🌍',
+  creativite: 'Kudos Créativité ✨',
+};
 
 const router = Router({ mergeParams: true });
 
@@ -31,6 +38,25 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
          WHERE p.id = $1 AND p.user_id != $2`,
         [req.params.postId, req.userId, type]
       ).catch(() => {});
+      (async () => {
+        try {
+          const { rows } = await pool.query(
+            `SELECT p.user_id::text AS author_id, u.name AS actor_name
+               FROM posts p, users u
+               WHERE p.id = $1 AND u.id = $2 AND p.user_id != $2`,
+            [req.params.postId, req.userId],
+          );
+          if (rows[0]) {
+            sendPush({
+              userIds: [rows[0].author_id],
+              title: rows[0].actor_name,
+              body: `t'a donné un ${KUDO_LABELS[type] ?? 'Kudos'}`,
+              category: 'kudos',
+              data: { url: `foodshare://post/${req.params.postId}` },
+            });
+          }
+        } catch {}
+      })();
       res.json({ given: true });
     }
   } catch {
