@@ -12,6 +12,7 @@ import kudosRoutes from './routes/kudos';
 import usersRoutes from './routes/users';
 import notificationsRoutes from './routes/notifications';
 import { createMessagesRouter } from './routes/messages';
+import { runMigrations } from './db/migrate';
 
 const app = express();
 
@@ -116,4 +117,10 @@ wss.on('connection', (ws) => {
 app.use('/messages', createMessagesRouter(emitToUser));
 
 const PORT = process.env.PORT ?? 3000;
-server.listen(PORT, () => console.log(`FoodShare API running on port ${PORT}`));
+
+runMigrations()
+  .then(() => server.listen(PORT, () => console.log(`FoodShare API running on port ${PORT}`)))
+  .catch(err => {
+    console.error('[boot] migration failed, exiting', err);
+    process.exit(1);
+  });
