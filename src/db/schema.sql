@@ -107,3 +107,30 @@ CREATE TABLE IF NOT EXISTS follows (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (follower_id, following_id)
 );
+
+-- Inscriptions en attente de vérification email (pas encore en `users`)
+CREATE TABLE IF NOT EXISTS pending_registrations (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  code_hash     TEXT NOT NULL,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  attempts      INT NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pending_registrations_email_idx
+  ON pending_registrations (LOWER(email));
+
+-- Codes de réinitialisation de mot de passe
+CREATE TABLE IF NOT EXISTS password_resets (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash     TEXT NOT NULL,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  attempts      INT NOT NULL DEFAULT 0,
+  consumed_at   TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS password_resets_user_active_idx
+  ON password_resets (user_id) WHERE consumed_at IS NULL;
