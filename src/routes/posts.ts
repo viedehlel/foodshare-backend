@@ -81,6 +81,47 @@ router.post('/', requireAuth, upload.single('image'), async (req: AuthRequest, r
   }
 });
 
+// GET /posts/explore — all posts, scored by popularity + recency, cursor-paginated
+router.get('/explore', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const afterRank = req.query.after_rank ? parseFloat(req.query.after_rank as string) : null;
+
+    const { rows } = await pool.query(
+      `SELECT
+         p.id, p.image_url, p.caption, p.location, p.created_at,
+         p.recipe_id, p.place_id, p.place_name, p.place_address,
+         r.title AS recipe_title,
+         u.id AS user_id, u.name AS user_name, u.avatar_url,
+         (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)::int AS like_count,
+         EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = $1) AS liked_by_me,
+         (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::int AS comment_count,
+         (SELECT COALESCE(json_agg(json_build_object('type', k.type, 'icon', k.icon, 'count', k.cnt)), '[]')
+          FROM (SELECT type, icon, COUNT(*)::int AS cnt FROM kudos WHERE post_id = p.id GROUP BY type, icon) k
+         ) AS kudos,
+         (SELECT COALESCE(json_agg(k2.type), '[]')
+          FROM kudos k2 WHERE k2.post_id = p.id AND k2.user_id = $1
+         ) AS my_kudos,
+         ((SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)::float * 2 + (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::float)
+           / (EXTRACT(EPOCH FROM now() - p.created_at) / 3600 + 2) AS score
+       FROM posts p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN recipes r ON r.id = p.recipe_id
+       WHERE $2::float IS NULL OR
+             ((SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id)::float * 2 + (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)::float)
+               / (EXTRACT(EPOCH FROM now() - p.created_at) / 3600 + 2) < $2
+       ORDER BY score DESC
+       LIMIT $3`,
+      [req.userId, afterRank, limit]
+    );
+
+    const nextCursor = rows.length === limit ? (rows[rows.length - 1] as any).score : null;
+    res.json({ posts: rows, nextCursor });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /posts/:id — single post detail
 router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
