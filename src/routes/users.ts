@@ -6,18 +6,31 @@ import { sendPush } from '../lib/push';
 
 const router = Router();
 
+// Auto-migrate: username column + highlights table
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`).catch(() => {});
+pool.query(`
+  CREATE TABLE IF NOT EXISTS highlights (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    post_id    UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    position   INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, post_id)
+  )
+`).catch(() => {});
+
 // GET /users/search?q=... — search users
 router.get('/search', requireAuth, async (req: AuthRequest, res: Response) => {
   const q = (req.query.q as string ?? '').trim();
   if (!q) { res.json({ users: [] }); return; }
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.name, u.avatar_url, u.bio, u.city,
+      `SELECT u.id, u.name, u.username, u.avatar_url, u.bio, u.city,
               (SELECT COUNT(*) FROM follows WHERE following_id = u.id)::int AS followers_count,
               EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND following_id = u.id) AS is_following
        FROM users u
        WHERE u.id != $2
-         AND (u.name ILIKE $1 OR u.email ILIKE $1)
+         AND (u.name ILIKE $1 OR u.email ILIKE $1 OR u.username ILIKE $1)
        LIMIT 20`,
       [`%${q}%`, req.userId]
     );
@@ -31,7 +44,7 @@ router.get('/search', requireAuth, async (req: AuthRequest, res: Response) => {
 router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.name, u.avatar_url, u.bio, u.city,
+      `SELECT u.id, u.name, u.username, u.avatar_url, u.bio, u.city,
               (SELECT COUNT(*) FROM follows WHERE following_id = u.id)::int AS followers_count,
               (SELECT COUNT(*) FROM follows WHERE follower_id = u.id)::int AS following_count,
               (SELECT COUNT(*) FROM posts WHERE user_id = u.id)::int AS posts_count,
@@ -41,6 +54,73 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     );
     if (!rows[0]) { res.status(404).json({ error: 'User not found' }); return; }
     res.json({ user: rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /users/:id/stats — data for badge computation
+router.get('/:id/stats', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM posts WHERE user_id = $1)::int AS posts_count,
+         (SELECT COUNT(*) FROM kudos WHERE post_id IN (SELECT id FROM posts WHERE user_id = $1))::int AS kudos_received,
+         (SELECT COUNT(*) FROM kudos WHERE post_id IN (SELECT id FROM posts WHERE user_id = $1) AND type = 'technique')::int AS kudos_technique,
+         (SELECT COUNT(*) FROM kudos WHERE post_id IN (SELECT id FROM posts WHERE user_id = $1) AND type = 'exploration')::int AS kudos_exploration,
+         (SELECT COUNT(*) FROM kudos WHERE post_id IN (SELECT id FROM posts WHERE user_id = $1) AND type = 'creativite')::int AS kudos_creativite,
+         (SELECT COUNT(*) FROM follows WHERE following_id = $1)::int AS followers_count`,
+      [req.params.id]
+    );
+    res.json({ stats: rows[0] });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /users/:id/highlights — pinned posts
+router.get('/:id/highlights', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.id, p.image_url, p.caption, p.created_at
+       FROM highlights h
+       JOIN posts p ON p.id = h.post_id
+       WHERE h.user_id = $1
+       ORDER BY h.position ASC, h.created_at DESC`,
+      [req.params.id]
+    );
+    res.json({ highlights: rows });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /users/me/highlights/:postId — toggle pin (max 6)
+router.post('/me/highlights/:postId', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await pool.query(
+      'SELECT id FROM highlights WHERE user_id = $1 AND post_id = $2',
+      [req.userId, req.params.postId]
+    );
+    if (existing.rows.length > 0) {
+      await pool.query('DELETE FROM highlights WHERE user_id = $1 AND post_id = $2', [req.userId, req.params.postId]);
+      res.json({ pinned: false });
+    } else {
+      const { rows: count } = await pool.query('SELECT COUNT(*) FROM highlights WHERE user_id = $1', [req.userId]);
+      if (parseInt(count[0].count) >= 6) {
+        res.status(400).json({ error: 'max_highlights_reached' });
+        return;
+      }
+      const { rows: pos } = await pool.query(
+        'SELECT COALESCE(MAX(position), -1) + 1 AS next FROM highlights WHERE user_id = $1',
+        [req.userId]
+      );
+      await pool.query(
+        'INSERT INTO highlights (user_id, post_id, position) VALUES ($1, $2, $3)',
+        [req.userId, req.params.postId, pos[0].next]
+      );
+      res.json({ pinned: true });
+    }
   } catch {
     res.status(500).json({ error: 'Server error' });
   }

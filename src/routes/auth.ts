@@ -147,7 +147,7 @@ router.post('/verify-email', async (req: Request, res: Response) => {
     const { rows: created } = await pool.query(
       `INSERT INTO users (name, email, password)
        VALUES ($1, $2, $3)
-       RETURNING id, name, email, avatar_url, bio, city`,
+       RETURNING id, name, email, avatar_url, bio, city, username`,
       [pending.name, pending.email, pending.password_hash],
     );
     await pool.query('DELETE FROM pending_registrations WHERE id = $1', [pending.id]);
@@ -342,7 +342,7 @@ router.post('/login', async (req: Request, res: Response) => {
   }
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email, password, avatar_url, bio, city FROM users WHERE email = $1',
+      'SELECT id, name, email, password, avatar_url, bio, city, username FROM users WHERE email = $1',
       [email],
     );
     if (!rows[0]) {
@@ -366,7 +366,7 @@ router.post('/login', async (req: Request, res: Response) => {
 router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email, avatar_url, bio, city FROM users WHERE id = $1',
+      'SELECT id, name, email, avatar_url, bio, city, username FROM users WHERE id = $1',
       [req.userId],
     );
     if (!rows[0]) { res.status(404).json({ error: 'User not found' }); return; }
@@ -379,17 +379,34 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
 // ─── Profile updates / avatar / change-password (unchanged) ───────────────────
 
 router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { name, bio, city, avatar_url } = req.body as Partial<{ name: string; bio: string; city: string; avatar_url: string }>;
+  const { name, bio, city, avatar_url, username } = req.body as Partial<{ name: string; bio: string; city: string; avatar_url: string; username: string }>;
+  // Validate username format if provided
+  if (username !== undefined && username !== null && username !== '') {
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+      res.status(400).json({ error: 'invalid_username' });
+      return;
+    }
+    // Check uniqueness
+    const { rows: taken } = await pool.query(
+      'SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND id != $2',
+      [username, req.userId]
+    );
+    if (taken.length > 0) {
+      res.status(409).json({ error: 'username_taken' });
+      return;
+    }
+  }
   try {
     const { rows } = await pool.query(
       `UPDATE users SET
         name       = COALESCE($1, name),
         bio        = COALESCE($2, bio),
         city       = COALESCE($3, city),
-        avatar_url = COALESCE($4, avatar_url)
+        avatar_url = COALESCE($4, avatar_url),
+        username   = CASE WHEN $6::text IS NOT NULL THEN $6 ELSE username END
        WHERE id = $5
-       RETURNING id, name, email, avatar_url, bio, city`,
-      [name, bio, city, avatar_url, req.userId],
+       RETURNING id, name, email, avatar_url, bio, city, username`,
+      [name, bio, city, avatar_url, req.userId, username ?? null],
     );
     res.json({ user: rows[0] });
   } catch {
@@ -402,7 +419,7 @@ router.post('/avatar', requireAuth, upload.single('image'), async (req: AuthRequ
   if (!file?.path) { res.status(400).json({ error: 'image required' }); return; }
   try {
     const { rows } = await pool.query(
-      'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, name, email, avatar_url, bio, city',
+      'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, name, email, avatar_url, bio, city, username',
       [file.path, req.userId],
     );
     res.json({ user: rows[0] });
